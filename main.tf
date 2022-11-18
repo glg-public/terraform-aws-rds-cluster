@@ -125,11 +125,17 @@ resource "aws_rds_cluster" "primary" {
   enabled_cloudwatch_logs_exports = var.enabled_cloudwatch_logs_exports
   deletion_protection             = var.deletion_protection
   replication_source_identifier   = var.replication_source_identifier
+
+  lifecycle {
+    ignore_changes = [
+      engine_version,
+    ]
+  }
 }
 
 # https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/rds_cluster#replication_source_identifier
 resource "aws_rds_cluster" "secondary" {
-  count                               = module.this.enabled && ! local.is_regional_cluster ? 1 : 0
+  count                               = module.this.enabled && !local.is_regional_cluster ? 1 : 0
   cluster_identifier                  = var.cluster_identifier == "" ? module.this.id : var.cluster_identifier
   database_name                       = var.db_name
   master_username                     = var.admin_user
@@ -199,6 +205,7 @@ resource "aws_rds_cluster" "secondary" {
     ignore_changes = [
       replication_source_identifier, # will be set/managed by Global Cluster
       snapshot_identifier,           # if created from a snapshot, will be non-null at creation, but null afterwards
+      engine_version,
     ]
   }
 }
