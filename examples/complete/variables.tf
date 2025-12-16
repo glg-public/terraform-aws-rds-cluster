@@ -4,7 +4,8 @@ variable "region" {
 }
 
 variable "availability_zones" {
-  type = list(string)
+  type        = list(string)
+  description = "Availability zones"
 }
 
 variable "instance_type" {
@@ -83,4 +84,10 @@ variable "allocated_storage" {
   type        = number
   description = "The allocated storage in GBs"
   default     = null
+}
+
+variable "intra_security_group_traffic_enabled" {
+  type        = bool
+  default     = false
+  description = "Whether to allow traffic between resources inside the database's security group."
 }

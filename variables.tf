@@ -1,7 +1,11 @@
 variable "zone_id" {
-  type        = string
-  default     = ""
-  description = "Route53 parent zone ID. If provided (not empty), the module will create sub-domain DNS records for the DB master and replicas"
+  type        = any
+  default     = []
+  description = <<-EOT
+    Route53 DNS Zone ID as list of string (0 or 1 items). If empty, no custom DNS name will be published.
+    If the list contains a single Zone ID, a custom DNS name will be pulished in that zone.
+    Can also be a plain string, but that use is DEPRECATED because of Terraform issues.
+    EOT
 }
 
 variable "security_groups" {
@@ -56,6 +60,23 @@ variable "db_port" {
   description = "Database port"
 }
 
+variable "manage_admin_user_password" {
+  type        = bool
+  default     = false
+  nullable    = false
+  description = "Set to true to allow RDS to manage the master user password in Secrets Manager. Cannot be set if master_password is provided"
+}
+
+variable "admin_user_secret_kms_key_id" {
+  type        = string
+  default     = null
+  description = <<-EOT
+    Amazon Web Services KMS key identifier is the key ARN, key ID, alias ARN, or alias name for the KMS key.
+    To use a KMS key in a different Amazon Web Services account, specify the key ARN or alias ARN.
+    If not specified, the default KMS key for your Amazon Web Services account is used.
+    EOT
+}
+
 variable "admin_user" {
   type        = string
   default     = "admin"
@@ -96,6 +117,15 @@ variable "cluster_parameters" {
   description = "List of DB cluster parameters to apply"
 }
 
+variable "rds_cluster_parameter_group_name" {
+  type        = string
+  default     = ""
+  description = <<-EOT
+    The name to give to the created `aws_rds_cluster_parameter_group` resource.
+    If omitted, the module will generate a name.
+    EOT
+}
+
 variable "instance_parameters" {
   type = list(object({
     apply_method = string
@@ -104,6 +134,21 @@ variable "instance_parameters" {
   }))
   default     = []
   description = "List of DB instance parameters to apply"
+}
+
+variable "db_parameter_group_name" {
+  type        = string
+  default     = ""
+  description = <<-EOT
+    The name to give to the created `aws_db_parameter_group` resource.
+    If omitted, the module will generate a name.
+    EOT
+}
+
+variable "db_cluster_instance_class" {
+  type        = string
+  default     = null
+  description = "This setting is required to create a provisioned Multi-AZ DB cluster"
 }
 
 variable "cluster_family" {
@@ -168,8 +213,9 @@ variable "scaling_configuration" {
 
 variable "serverlessv2_scaling_configuration" {
   type = object({
-    min_capacity = number
-    max_capacity = number
+    min_capacity             = number
+    max_capacity             = number
+    seconds_until_auto_pause = optional(number, null)
   })
   default     = null
   description = "serverlessv2 scaling properties"
@@ -188,17 +234,35 @@ variable "timeouts_configuration" {
 variable "restore_to_point_in_time" {
   type = list(object({
     source_cluster_identifier  = string
-    restore_type               = string
-    use_latest_restorable_time = bool
+    restore_type               = optional(string, "copy-on-write")
+    use_latest_restorable_time = optional(bool, true)
+    restore_to_time            = optional(string, null)
   }))
   default     = []
-  description = "List point-in-time recovery options. Only valid actions are `source_cluster_identifier`, `restore_type` and `use_latest_restorable_time`"
+  description = <<-EOT
+    List of point-in-time recovery options. Valid parameters are:
+
+    `source_cluster_identifier`
+      Identifier of the source database cluster from which to restore.
+    `restore_type`:
+      Type of restore to be performed. Valid options are "full-copy" and "copy-on-write".
+    `use_latest_restorable_time`:
+      Set to true to restore the database cluster to the latest restorable backup time. Conflicts with `restore_to_time`.
+    `restore_to_time`:
+      Date and time in UTC format to restore the database cluster to. Conflicts with `use_latest_restorable_time`.
+EOT
 }
 
 variable "allowed_cidr_blocks" {
   type        = list(string)
   default     = []
   description = "List of CIDR blocks allowed to access the cluster"
+}
+
+variable "allowed_ipv6_cidr_blocks" {
+  type        = list(string)
+  default     = []
+  description = "List of IPv6 CIDR blocks allowed to access the cluster"
 }
 
 variable "publicly_accessible" {
@@ -215,7 +279,7 @@ variable "storage_encrypted" {
 
 variable "storage_type" {
   type        = string
-  description = "One of 'standard' (magnetic), 'gp2' (general purpose SSD), or 'io1' (provisioned IOPS SSD)"
+  description = "One of 'standard' (magnetic), 'gp2' (general purpose SSD), 'io1' (provisioned IOPS SSD), 'aurora', or 'aurora-iopt1'"
   default     = null
 }
 
@@ -315,6 +379,21 @@ variable "performance_insights_retention_period" {
   default     = null
 }
 
+variable "database_insights_mode" {
+  description = "The database insights mode for the RDS cluster. Valid values are `standard`, `advanced`. See https://registry.terraform.io/providers/hashicorp/aws/6.16.0/docs/resources/rds_cluster#database_insights_mode-1"
+  type        = string
+  default     = null
+}
+
+variable "promotion_tier" {
+  type        = number
+  default     = 0
+  description = <<-EOT
+Failover Priority setting on instance level. The reader who has lower tier has higher priority to get promoted to writer.
+
+Readers in promotion tiers 0 and 1 scale at the same time as the writer. Readers in promotion tiers 2–15 scale independently from the writer. For more information, see: https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.how-it-works.html#aurora-serverless-v2.how-it-works.scaling
+EOT
+}
 variable "autoscaling_enabled" {
   type        = bool
   default     = false
@@ -455,4 +534,82 @@ variable "subnet_group_name" {
   description = "Database subnet group name. Will use generated label ID if not supplied."
   type        = string
   default     = ""
+}
+
+variable "intra_security_group_traffic_enabled" {
+  type        = bool
+  default     = false
+  description = "Whether to allow traffic between resources inside the database's security group."
+}
+
+variable "activity_stream_enabled" {
+  type        = bool
+  default     = false
+  description = "Whether to enable Activity Streams"
+}
+
+variable "activity_stream_mode" {
+  type        = string
+  default     = "async"
+  description = "The mode for the Activity Streams. `async` and `sync` are supported. Defaults to `async`"
+}
+
+variable "activity_stream_kms_key_id" {
+  type        = string
+  default     = ""
+  description = "The ARN for the KMS key to encrypt Activity Stream Data data. When specifying `activity_stream_kms_key_id`, `activity_stream_enabled` needs to be set to true"
+}
+
+variable "parameter_group_name_prefix_enabled" {
+  type        = bool
+  default     = true
+  description = "Set to `true` to use `name_prefix` to name the cluster and database parameter groups. Set to `false` to use `name` instead"
+}
+
+variable "enable_global_write_forwarding" {
+  type        = bool
+  default     = null
+  description = "Set to `true`, to forward writes to an associated global cluster."
+}
+
+variable "enable_local_write_forwarding" {
+  type        = bool
+  default     = null
+  description = "Set to `true`, to forward writes sent to a reader to the writer instance."
+}
+
+variable "network_type" {
+  type        = string
+  default     = "IPV4"
+  description = "The network type of the cluster. Valid values: IPV4, DUAL."
+}
+
+variable "use_reserved_instances" {
+  type        = bool
+  default     = false
+  description = <<-EOT
+    WARNING: Observe your plans and applies carefully when using this feature.
+    It has potential to be very expensive if not used correctly.
+    Also, it is not clear what happens when the reservation expires.
+
+    Whether to use reserved instances.
+  EOT
+}
+
+variable "rds_ri_offering_type" {
+  type        = string
+  default     = ""
+  description = "Offering type of reserved DB instances. Valid values are 'No Upfront', 'Partial Upfront', 'All Upfront'."
+}
+
+variable "rds_ri_duration" {
+  type        = number
+  default     = 1
+  description = "The number of years to reserve the instance. Values can be 1 or 3 (or in seconds, 31536000 or 94608000)"
+}
+
+variable "rds_ri_reservation_id" {
+  type        = string
+  default     = null
+  description = "Customer-specified identifier to track the reservation of the reserved DB instance."
 }

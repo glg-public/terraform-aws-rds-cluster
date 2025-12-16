@@ -8,19 +8,20 @@ stage = "test"
 
 name = "rds-cluster"
 
-instance_type = "db.t3.small"
+# https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.DBInstanceClass.html#Concepts.DBInstanceClass.SupportAurora
+instance_type = "db.t3.medium"
 
-cluster_family = "aurora5.6"
+cluster_family = "aurora-mysql8.0"
+
+engine = "aurora-mysql"
+
+engine_mode = "provisioned"
 
 cluster_size = 1
 
 deletion_protection = false
 
 autoscaling_enabled = false
-
-engine = "aurora"
-
-engine_mode = "provisioned"
 
 db_name = "test_db"
 
@@ -31,3 +32,5 @@ admin_password = "admin_password"
 enhanced_monitoring_role_enabled = true
 
 rds_monitoring_interval = 30
+
+intra_security_group_traffic_enabled = true
